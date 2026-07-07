@@ -4,3 +4,4 @@ requests
 eventlet
 python-engineio
 python-socketio
+gunicorn
