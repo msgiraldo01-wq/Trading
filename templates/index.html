@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>METALS-QUANT v2.0</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="{{ url_for('static', filename='js/socket.io.js') }}"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <style>
+        .barra-sl { transition: width .6s ease, background-color .6s ease; }
+        .fade-in  { animation: fadeIn .3s ease; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(-3px) } to { opacity:1; transform:translateY(0) } }
+        .tab-btn  { border-bottom: 2px solid transparent; transition: all .2s; }
+        .tab-btn.active { border-bottom-color: #f59e0b; color: #f59e0b; }
+        .pnl-pos  { color: #4ade80; }
+        .pnl-neg  { color: #f87171; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen">
+<div class="max-w-7xl mx-auto px-4 py-5">
+
+<!-- ═══ HEADER ════════════════════════════════════════════════════════════ -->
+<header class="flex justify-between items-center border-b border-gray-700 pb-4 mb-5">
+    <div>
+        <div class="flex items-center gap-3">
+            <h1 class="text-3xl font-bold text-yellow-500 tracking-wide">METALS-QUANT v2.0</h1>
+            <span id="badge-modo" class="px-2 py-0.5 rounded text-xs font-bold bg-yellow-900 text-yellow-400 border border-yellow-700">🟡 SIMULACIÓN</span>
+        </div>
+        <p class="text-gray-500 text-sm mt-1">High-Frequency Grid Trading · PAXG/USDT · Binance</p>
+    </div>
+    <div class="flex items-center gap-3">
+        <button onclick="resetearSimulacion()" class="px-3 py-2 rounded text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-300 transition">↺ RESETEAR</button>
+        <div class="flex items-center gap-3 bg-gray-800 px-4 py-2 rounded-lg border border-gray-700">
+            <span class="text-sm font-semibold text-gray-400">ESTADO:</span>
+            <button id="btn-status" onclick="alternarBot()" class="px-4 py-2 rounded font-bold text-sm uppercase bg-red-600 hover:bg-red-500 text-white transition">APAGADO</button>
+        </div>
+    </div>
+</header>
+
+<!-- ═══ CARDS MÉTRICAS ═════════════════════════════════════════════════════ -->
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+    <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+        <p class="text-gray-400 uppercase text-xs font-bold tracking-wider mb-2">Precio PAXG / USDT</p>
+        <div class="flex items-baseline gap-2">
+            <span id="precio-oro" class="text-3xl font-mono font-bold text-yellow-400">---.--</span>
+            <span class="text-xs text-gray-500">USD/oz</span>
+        </div>
+        <p class="text-xs text-gray-600 mt-2">Oro tokenizado · Binance en tiempo real</p>
+    </div>
+    <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+        <p class="text-gray-400 uppercase text-xs font-bold tracking-wider mb-2">Capital</p>
+        <span id="capital-actual" class="text-3xl font-mono font-bold text-white">$1,000.00</span>
+        <div class="flex justify-between mt-2">
+            <span class="text-xs text-gray-500">Inicial: $1,000.00</span>
+            <span id="capital-rendimiento" class="text-xs font-bold text-gray-400">0.000%</span>
+        </div>
+    </div>
+    <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+        <p class="text-gray-400 uppercase text-xs font-bold tracking-wider mb-2">P&L</p>
+        <div class="space-y-1.5">
+            <div class="flex justify-between"><span class="text-xs text-gray-500">Realizado</span><span id="pnl-realizado" class="text-xs font-mono font-bold text-green-400">+$0.0000</span></div>
+            <div class="flex justify-between"><span class="text-xs text-gray-500">Flotante</span><span id="pnl-flotante" class="text-xs font-mono font-bold text-gray-400">$0.0000</span></div>
+            <div class="border-t border-gray-700 pt-1.5 flex justify-between">
+                <span class="text-xs text-gray-400 font-semibold">Total neto</span>
+                <span id="pnl-total" class="text-sm font-mono font-bold text-white">+$0.0000</span>
+            </div>
+        </div>
+    </div>
+    <div class="bg-gray-800 p-5 rounded-xl border border-gray-700">
+        <p class="text-gray-400 uppercase text-xs font-bold tracking-wider mb-2">Protección de Capital</p>
+        <div class="flex justify-between items-center mb-2">
+            <span id="sl-pct-usado" class="text-3xl font-mono font-bold text-green-400">0.0%</span>
+            <div class="text-right"><p class="text-xs text-gray-500">Stop-Loss</p><p id="sl-limite" class="text-xs font-bold text-gray-300">$30.00 (3%)</p></div>
+        </div>
+        <div class="w-full bg-gray-700 rounded-full h-2"><div id="barra-sl" class="barra-sl h-2 rounded-full bg-green-500" style="width:0%"></div></div>
+        <p id="sl-restante" class="text-xs text-gray-500 mt-1.5">Margen restante: $30.00</p>
+    </div>
+</div>
+
+<!-- ═══ TABS ══════════════════════════════════════════════════════════════ -->
+<div class="flex gap-6 border-b border-gray-700 mb-5">
+    <button id="tab-btn-live" onclick="cambiarTab('live')" class="tab-btn active pb-2 text-sm font-semibold text-yellow-400">📡 En Vivo</button>
+    <button id="tab-btn-historico" onclick="cambiarTab('historico')" class="tab-btn pb-2 text-sm font-semibold text-gray-400 hover:text-gray-200">📊 Histórico</button>
+</div>
+
+<!-- ═══ TAB EN VIVO ════════════════════════════════════════════════════════ -->
+<div id="tab-live">
+
+    <!-- Info strip -->
+    <div class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 mb-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-400">
+        <span>📐 Distancia: <strong id="cfg-distancia" class="text-gray-200">$1.00</strong></span>
+        <span>📦 Tamaño op.: <strong id="cfg-tamano" class="text-gray-200">0.02 oz</strong></span>
+        <span>🔢 Niveles máx: <strong id="cfg-niveles" class="text-gray-200">8</strong></span>
+        <span>📊 Abiertas: <strong id="posiciones-abiertas" class="text-yellow-400">0</strong></span>
+        <span>💵 Ganancia/ciclo: <strong id="cfg-ganancia-ciclo" class="text-gray-200">~$0.020</strong></span>
+        <span>🔒 Stop-Loss: <strong id="cfg-sl" class="text-gray-200">$30.00 (3%)</strong></span>
+    </div>
+
+    <!-- Panel posiciones abiertas -->
+    <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 mb-4">
+        <div class="flex justify-between items-center mb-3">
+            <div class="flex items-center gap-2">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400">Posiciones Abiertas</h3>
+                <span id="badge-pos" class="bg-blue-900/60 text-blue-400 border border-blue-800 px-2 py-0.5 rounded-full text-[10px] font-bold">0</span>
+            </div>
+            <div class="flex items-center gap-4 text-xs">
+                <span class="text-gray-500">P&L flotante total: <span id="pnl-pos-total" class="font-mono font-bold text-gray-300">$0.0000</span></span>
+                <span class="text-gray-500">Expuesto: <span id="capital-expuesto" class="font-mono font-bold text-gray-300">$0.00</span></span>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+                <thead>
+                    <tr class="text-gray-500 text-[10px] uppercase border-b border-gray-700">
+                        <th class="pb-1.5 pr-4 text-left">Entrada</th>
+                        <th class="pb-1.5 pr-4 text-left">Objetivo TP</th>
+                        <th class="pb-1.5 pr-4 text-left">Dist. al TP</th>
+                        <th class="pb-1.5 pr-4 text-left">Qty (oz)</th>
+                        <th class="pb-1.5 pr-4 text-left">Valor USD</th>
+                        <th class="pb-1.5 text-left">P&L</th>
+                    </tr>
+                </thead>
+                <tbody id="tabla-posiciones" class="font-mono"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Gráfico en vivo con navegación -->
+    <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 mb-5">
+        <div class="flex justify-between items-center mb-3">
+            <div class="flex items-center gap-3">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400">Gráfico de Precio</h3>
+                <span id="badge-chart-live" class="flex items-center gap-1 text-xs font-bold text-green-400">
+                    <span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block"></span>EN VIVO
+                </span>
+                <span id="badge-chart-hist" class="hidden text-xs font-bold text-orange-400">◀ MODO HISTÓRICO</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="retrocederGrafico()" title="Ver datos anteriores"
+                    class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded transition">← Anterior</button>
+                <button id="btn-ir-ahora" onclick="irAhora()" title="Volver al tiempo real"
+                    class="hidden px-3 py-1 bg-yellow-700 hover:bg-yellow-600 text-yellow-100 text-xs rounded font-bold transition">↩ Ahora</button>
+                <button onclick="avanzarGrafico()" title="Ver datos más recientes"
+                    class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded transition">Adelante →</button>
+            </div>
+        </div>
+        <div style="height:260px; position:relative;">
+            <canvas id="grafico-vivo"></canvas>
+        </div>
+    </div>
+
+    <!-- Consola + Historial -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div class="bg-gray-950 p-4 rounded-xl border border-gray-800 flex flex-col h-[360px]">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center">
+                <span class="w-2 h-2 rounded-full bg-green-500 inline-block mr-2 animate-pulse"></span>Consola
+            </h3>
+            <div id="consola-logs" class="bg-black p-3 rounded-lg font-mono text-xs overflow-y-auto flex-1 border border-gray-900 space-y-0.5">
+                <div class="text-gray-600">// Sistema listo...</div>
+            </div>
+        </div>
+        <div class="lg:col-span-2 bg-gray-800 p-4 rounded-xl border border-gray-700 h-[360px] flex flex-col">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Historial de Operaciones</h3>
+            <div class="overflow-auto flex-1">
+                <table class="w-full text-left text-xs text-gray-300">
+                    <thead class="bg-gray-900 text-gray-400 uppercase tracking-wider text-[10px] sticky top-0">
+                        <tr>
+                            <th class="p-2">Fecha</th><th class="p-2">Ticket</th><th class="p-2">Tipo</th>
+                            <th class="p-2">Precio</th><th class="p-2">Qty</th><th class="p-2">Total</th><th class="p-2">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabla-operaciones" class="divide-y divide-gray-700/50 font-mono"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ TAB HISTÓRICO ══════════════════════════════════════════════════════ -->
+<div id="tab-historico" class="hidden">
+    <div class="bg-gray-800 border border-gray-700 rounded-xl p-4 mb-5 flex flex-wrap gap-4 items-end">
+        <div>
+            <label class="text-xs text-gray-400 block mb-1">Desde</label>
+            <input type="date" id="filtro-desde" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-yellow-500">
+        </div>
+        <div>
+            <label class="text-xs text-gray-400 block mb-1">Hasta</label>
+            <input type="date" id="filtro-hasta" class="bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-yellow-500">
+        </div>
+        <button onclick="consultarHistorico()" class="px-5 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-black font-bold text-sm rounded transition">🔍 Consultar</button>
+        <button onclick="consultarHistoricoHoy()" class="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded transition">Hoy</button>
+        <button onclick="consultarHistoricoRango(7)" class="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded transition">7 días</button>
+        <button onclick="consultarHistoricoRango(30)" class="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded transition">30 días</button>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 text-center">
+            <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">P&L del Período</p>
+            <p id="h-pnl-total" class="text-2xl font-mono font-bold text-green-400">$0.0000</p>
+        </div>
+        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 text-center">
+            <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Capital Final</p>
+            <p id="h-capital-final" class="text-2xl font-mono font-bold text-white">$1,000.00</p>
+        </div>
+        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 text-center">
+            <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Win Rate</p>
+            <p id="h-win-rate" class="text-2xl font-mono font-bold text-yellow-400">0%</p>
+            <p id="h-ops-detalle" class="text-xs text-gray-500 mt-1">0 ventas · 0 SL</p>
+        </div>
+        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 text-center">
+            <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Operaciones</p>
+            <p id="h-n-ops" class="text-2xl font-mono font-bold text-blue-400">0</p>
+            <p id="h-ops-tipos" class="text-xs text-gray-500 mt-1">0 compras · 0 ventas</p>
+        </div>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">P&L por Día</h3>
+            <div style="height:220px;position:relative;"><canvas id="grafico-pnl-dia"></canvas></div>
+        </div>
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Evolución del Capital</h3>
+            <div style="height:220px;position:relative;"><canvas id="grafico-capital"></canvas></div>
+        </div>
+    </div>
+    <div class="bg-gray-800 border border-gray-700 rounded-xl p-4">
+        <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3">Últimas 50 Operaciones del Período</h3>
+        <div class="overflow-auto max-h-72">
+            <table class="w-full text-left text-xs text-gray-300">
+                <thead class="bg-gray-900 text-gray-400 uppercase tracking-wider text-[10px] sticky top-0">
+                    <tr>
+                        <th class="p-2">Fecha</th><th class="p-2">Ticket</th><th class="p-2">Tipo</th>
+                        <th class="p-2">Precio</th><th class="p-2">Qty</th><th class="p-2">Total</th><th class="p-2">Estado</th>
+                    </tr>
+                </thead>
+                <tbody id="tabla-historico" class="divide-y divide-gray-700/50 font-mono"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+</div><!-- /container -->
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+//  ESTADO GLOBAL
+// ════════════════════════════════════════════════════════════════════════════
+let botActivo   = false;
+let PRECIO_ACT  = 0;
+const socket    = io();
+
+// Historial completo del gráfico (hasta 3000 puntos = ~100 min)
+const MAX_HIST  = 3000;
+const VENTANA   = 120;       // puntos visibles al mismo tiempo
+let desplaz     = 0;         // 0 = en vivo, N = N puntos hacia atrás
+
+const todoL = [], todoP = [], todoC = [], todoV = [];  // labels, precios, compras, ventas
+let   grafico = null;
+
+// Gráficos históricos
+let gPnlDia = null, gCapital = null;
+
+// ════════════════════════════════════════════════════════════════════════════
+//  ARRANQUE
+// ════════════════════════════════════════════════════════════════════════════
+window.onload = () => {
+    cargarEstadoInicial();
+    initGrafico();
+    const hoy = new Date().toISOString().split('T')[0];
+    document.getElementById('filtro-desde').value = hoy;
+    document.getElementById('filtro-hasta').value = hoy;
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+//  TABS
+// ════════════════════════════════════════════════════════════════════════════
+function cambiarTab(tab) {
+    ['live','historico'].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== tab);
+        const btn = document.getElementById(`tab-btn-${t}`);
+        btn.classList.toggle('active', t === tab);
+        btn.classList.toggle('text-gray-400', t !== tab);
+    });
+    if (tab === 'historico') consultarHistorico();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  GRÁFICO EN VIVO — NAVEGACIÓN EN EL TIEMPO
+// ════════════════════════════════════════════════════════════════════════════
+function initGrafico() {
+    const ctx = document.getElementById('grafico-vivo').getContext('2d');
+    grafico = new Chart(ctx, {
+        data: {
+            labels: [],
+            datasets: [
+                {
+                    type: 'line', label: 'PAXG/USDT',
+                    data: [], borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245,158,11,0.06)',
+                    borderWidth: 2, pointRadius: 0, fill: true, tension: 0.3
+                },
+                {
+                    type: 'line', label: '▲ Compra',
+                    data: [], showLine: false,
+                    borderColor: '#60a5fa', backgroundColor: '#60a5fa',
+                    pointStyle: 'triangle', pointRadius: 9, pointHoverRadius: 11,
+                    pointBorderColor: '#1d4ed8', pointBorderWidth: 2
+                },
+                {
+                    type: 'line', label: '▼ Venta',
+                    data: [], showLine: false,
+                    borderColor: '#4ade80', backgroundColor: '#4ade80',
+                    pointStyle: 'rectRot', pointRadius: 8, pointHoverRadius: 10,
+                    pointBorderColor: '#15803d', pointBorderWidth: 2
+                }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            interaction: { intersect: false, mode: 'index' },
+            scales: {
+                x: { ticks: { color: '#6b7280', maxTicksLimit: 10, font: {size: 9} }, grid: { color: '#1f2937' } },
+                y: { ticks: { color: '#6b7280', font: {size: 10} }, grid: { color: '#1f2937' } }
+            },
+            plugins: {
+                legend: { labels: { color: '#9ca3af', font: {size: 10}, boxWidth: 14, padding: 12 } },
+                tooltip: { backgroundColor: '#111827', titleColor: '#f59e0b', bodyColor: '#d1d5db', borderColor: '#374151', borderWidth: 1 }
+            }
+        }
+    });
+}
+
+function renderVentana() {
+    const total  = todoL.length;
+    if (!total) return;
+    const fin    = Math.max(VENTANA, total - desplaz);
+    const inicio = Math.max(0, fin - VENTANA);
+    grafico.data.labels             = todoL.slice(inicio, fin);
+    grafico.data.datasets[0].data   = todoP.slice(inicio, fin);
+    grafico.data.datasets[1].data   = todoC.slice(inicio, fin);
+    grafico.data.datasets[2].data   = todoV.slice(inicio, fin);
+    grafico.update('none');
+    // Controles de navegación
+    const enVivo = desplaz === 0;
+    document.getElementById('badge-chart-live').classList.toggle('hidden', !enVivo);
+    document.getElementById('badge-chart-hist').classList.toggle('hidden', enVivo);
+    document.getElementById('btn-ir-ahora').classList.toggle('hidden', enVivo);
+}
+
+function agregarPuntoGrafico(precio, hora) {
+    todoL.push(hora); todoP.push(precio); todoC.push(null); todoV.push(null);
+    if (todoL.length > MAX_HIST) { todoL.shift(); todoP.shift(); todoC.shift(); todoV.shift(); }
+    if (desplaz === 0) renderVentana();  // solo actualiza si está en live
+}
+
+function marcarOperacionGrafico(precio, tipo) {
+    // Marca en el penúltimo punto (el que estaba activo cuando llegó la operación)
+    const idx = Math.max(0, todoC.length - 2);
+    if (tipo === 'COMPRA')     todoC[idx] = precio;
+    else if (tipo === 'VENTA') todoV[idx] = precio;
+    else if (tipo === 'VENTA_SL') todoV[idx] = precio;
+    if (desplaz === 0) renderVentana();
+}
+
+function retrocederGrafico() {
+    desplaz = Math.min(desplaz + VENTANA, Math.max(0, todoL.length - VENTANA));
+    renderVentana();
+}
+function avanzarGrafico() {
+    desplaz = Math.max(0, desplaz - VENTANA);
+    renderVentana();
+}
+function irAhora() {
+    desplaz = 0;
+    renderVentana();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  GRÁFICOS HISTÓRICOS
+// ════════════════════════════════════════════════════════════════════════════
+function renderGraficoPnlDia(dias) {
+    if (gPnlDia) { gPnlDia.destroy(); gPnlDia = null; }
+    const ctx    = document.getElementById('grafico-pnl-dia').getContext('2d');
+    const labels = dias.map(d => d.dia);
+    const pnls   = dias.map(d => parseFloat(d.pnl_dia));
+    const nOps   = dias.map(d => d.n_ventas);
+    gPnlDia = new Chart(ctx, {
+        data: {
+            labels,
+            datasets: [
+                { type:'bar', label:'P&L ($)', data:pnls, yAxisID:'y',
+                  backgroundColor: pnls.map(v => v>=0 ? 'rgba(74,222,128,0.55)' : 'rgba(248,113,113,0.55)'),
+                  borderColor:     pnls.map(v => v>=0 ? '#4ade80' : '#f87171'),
+                  borderWidth:1, borderRadius:3 },
+                { type:'line', label:'# Ventas', data:nOps, yAxisID:'y1',
+                  borderColor:'#60a5fa', backgroundColor:'transparent',
+                  pointRadius:4, pointBackgroundColor:'#60a5fa', borderWidth:1.5 }
+            ]
+        },
+        options: {
+            responsive:true, maintainAspectRatio:false, animation:{duration:400},
+            scales: {
+                x:  { ticks:{color:'#6b7280',font:{size:10}}, grid:{color:'#1f2937'} },
+                y:  { position:'left',  ticks:{color:'#6b7280',font:{size:10}}, grid:{color:'#1f2937'} },
+                y1: { position:'right', ticks:{color:'#6b7280',font:{size:10}}, grid:{drawOnChartArea:false} }
+            },
+            plugins: { legend:{labels:{color:'#9ca3af',font:{size:10},boxWidth:12}},
+                       tooltip:{backgroundColor:'#111827',titleColor:'#f59e0b',bodyColor:'#d1d5db'} }
+        }
+    });
+}
+
+function renderGraficoCapital(dias) {
+    if (gCapital) { gCapital.destroy(); gCapital = null; }
+    const ctx    = document.getElementById('grafico-capital').getContext('2d');
+    const labels = ['Inicio', ...dias.map(d => d.dia)];
+    const vals   = [1000,     ...dias.map(d => parseFloat(d.capital))];
+    gCapital = new Chart(ctx, {
+        type:'line',
+        data: {
+            labels,
+            datasets: [{ label:'Capital ($)', data:vals,
+                borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.08)',
+                borderWidth:2, pointRadius:5, pointBackgroundColor:'#f59e0b',
+                fill:true, tension:0.3 }]
+        },
+        options: {
+            responsive:true, maintainAspectRatio:false, animation:{duration:400},
+            scales: {
+                x: { ticks:{color:'#6b7280',font:{size:10}}, grid:{color:'#1f2937'} },
+                y: { ticks:{color:'#6b7280',font:{size:10}}, grid:{color:'#1f2937'} }
+            },
+            plugins: { legend:{labels:{color:'#9ca3af',font:{size:10},boxWidth:12}},
+                       tooltip:{backgroundColor:'#111827',titleColor:'#f59e0b',bodyColor:'#d1d5db'} }
+        }
+    });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  CONSULTAS HISTÓRICAS
+// ════════════════════════════════════════════════════════════════════════════
+function consultarHistoricoHoy() {
+    const hoy = new Date().toISOString().split('T')[0];
+    document.getElementById('filtro-desde').value = hoy;
+    document.getElementById('filtro-hasta').value = hoy;
+    consultarHistorico();
+}
+function consultarHistoricoRango(dias) {
+    const hasta = new Date(), desde = new Date();
+    desde.setDate(desde.getDate() - dias + 1);
+    document.getElementById('filtro-desde').value = desde.toISOString().split('T')[0];
+    document.getElementById('filtro-hasta').value = hasta.toISOString().split('T')[0];
+    consultarHistorico();
+}
+function consultarHistorico() {
+    const desde = document.getElementById('filtro-desde').value;
+    const hasta = document.getElementById('filtro-hasta').value;
+    fetch(`/api/historico?desde=${desde}&hasta=${hasta}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) return console.error(data.error);
+            const r = data.resumen;
+            setPnlEl('h-pnl-total', r.pnl_total, '2xl');
+            document.getElementById('h-capital-final').textContent = '$' + parseFloat(r.capital_final).toFixed(2);
+            document.getElementById('h-win-rate').textContent      = r.win_rate + '%';
+            document.getElementById('h-ops-detalle').textContent   = `${r.n_ventas_tp} ventas · ${r.n_stop_loss} SL`;
+            document.getElementById('h-n-ops').textContent         = (r.n_compras||0) + (r.n_ventas_tp||0) + (r.n_stop_loss||0);
+            document.getElementById('h-ops-tipos').textContent     = `${r.n_compras||0} compras · ${(r.n_ventas_tp||0)+(r.n_stop_loss||0)} ventas`;
+            if (data.por_dia?.length) { renderGraficoPnlDia(data.por_dia); renderGraficoCapital(data.por_dia); }
+            renderizarTabla(data.operaciones, 'tabla-historico');
+        })
+        .catch(e => console.error('Error histórico:', e));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  ESTADO INICIAL
+// ════════════════════════════════════════════════════════════════════════════
+function cargarEstadoInicial() {
+    fetch('/api/estado').then(r => r.json()).then(data => {
+        if (data.error) return;
+        PRECIO_ACT = data.precio_actual || 0;
+        botActivo  = data.bot_corriendo;
+        actualizarBoton();
+        actualizarMetricas(data);
+        renderizarTabla(data.historial, 'tabla-operaciones');
+        renderizarPosicionesAbiertas(data.posiciones_detalle || [], data.precio_actual || 0);
+        if (data.config_grid) {
+            const c = data.config_grid;
+            document.getElementById('cfg-distancia').textContent     = `$${c.distancia.toFixed(2)}`;
+            document.getElementById('cfg-tamano').textContent        = `${c.tamano} oz`;
+            document.getElementById('cfg-niveles').textContent       = c.niveles;
+            document.getElementById('cfg-ganancia-ciclo').textContent= `~$${(c.distancia * c.tamano).toFixed(3)}`;
+        }
+        if (data.stop_loss_usd) {
+            const txt = `$${data.stop_loss_usd.toFixed(2)} (${(data.stop_loss_pct||3).toFixed(0)}%)`;
+            document.getElementById('cfg-sl').textContent    = txt;
+            document.getElementById('sl-limite').textContent = txt;
+        }
+        if (data.modo === 'REAL') {
+            const b = document.getElementById('badge-modo');
+            b.textContent = '🔴 REAL';
+            b.className = 'px-2 py-0.5 rounded text-xs font-bold bg-red-900 text-red-400 border border-red-700';
+        }
+    }).catch(e => console.error(e));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  POSICIONES ABIERTAS
+// ════════════════════════════════════════════════════════════════════════════
+function renderizarPosicionesAbiertas(posiciones, precio) {
+    const tbody    = document.getElementById('tabla-posiciones');
+    const badge    = document.getElementById('badge-pos');
+    const elTotal  = document.getElementById('pnl-pos-total');
+    const elExpues = document.getElementById('capital-expuesto');
+    if (!tbody) return;
+
+    badge.textContent = posiciones.length;
+    document.getElementById('posiciones-abiertas').textContent = posiciones.length;
+
+    const pnlTotal    = posiciones.reduce((s, p) => s + p.pnl_pos, 0);
+    const capExpuesto = posiciones.reduce((s, p) => s + p.total_usd, 0);
+
+    elTotal.textContent  = (pnlTotal >= 0 ? '+$' : '-$') + Math.abs(pnlTotal).toFixed(4);
+    elTotal.className    = 'font-mono font-bold ' + (pnlTotal >= 0 ? 'text-green-400' : 'text-red-400');
+    elExpues.textContent = '$' + capExpuesto.toFixed(2);
+
+    if (!posiciones.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-2 text-center text-gray-600 text-xs">// Sin posiciones abiertas</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = '';
+    posiciones.forEach(pos => {
+        const pnl     = pos.pnl_pos;
+        const dist    = pos.precio_tp - precio;
+        const pnlCls  = pnl >= 0 ? 'text-green-400' : 'text-red-400';
+        const distCls = dist > 0 ? 'text-blue-400' : 'text-orange-400';
+        tbody.innerHTML += `
+            <tr class="border-b border-gray-700/30 hover:bg-gray-700/20">
+                <td class="pr-4 py-1.5 text-white font-bold">$${pos.precio_ejecucion.toFixed(2)}</td>
+                <td class="pr-4 py-1.5 text-yellow-400">$${pos.precio_tp.toFixed(2)}</td>
+                <td class="pr-4 py-1.5 ${distCls}">${dist >= 0 ? '+' : ''}$${dist.toFixed(2)}</td>
+                <td class="pr-4 py-1.5 text-gray-300">${pos.cantidad.toFixed(4)}</td>
+                <td class="pr-4 py-1.5 text-gray-400">$${pos.total_usd.toFixed(2)}</td>
+                <td class="py-1.5 ${pnlCls} font-bold">${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(4)}</td>
+            </tr>`;
+    });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MÉTRICAS
+// ════════════════════════════════════════════════════════════════════════════
+function actualizarMetricas(data) {
+    if (data.precio_actual) document.getElementById('precio-oro').textContent = data.precio_actual.toFixed(2);
+    const ci = data.capital_inicial||1000, ca = data.capital_actual||ci, rnd = (ca-ci)/ci*100;
+    document.getElementById('capital-actual').textContent = '$' + ca.toFixed(2);
+    const elR = document.getElementById('capital-rendimiento');
+    elR.textContent = (rnd>=0?'+':'') + rnd.toFixed(3) + '%';
+    elR.className   = 'text-xs font-bold ' + (rnd>=0?'text-green-400':'text-red-400');
+    setPnlEl('pnl-realizado', data.ganancia_realizada||0, 'xs');
+    setPnlEl('pnl-flotante',  data.pnl_flotante||0, 'xs');
+    setPnlEl('pnl-total', (data.ganancia_realizada||0)+(data.pnl_flotante||0), 'sm');
+    actualizarStopLoss(data.stop_loss_pct_usado||0, data.stop_loss_usd||30);
+}
+
+function setPnlEl(id, v, size) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = (v>=0?'+$':'-$') + Math.abs(v).toFixed(4);
+    el.className   = `text-${size} font-mono font-bold ` + (v>=0?'text-green-400':'text-red-400');
+}
+
+function actualizarStopLoss(pct, slUsd) {
+    const p = Math.min(pct,100);
+    document.getElementById('sl-restante').textContent = `Margen restante: $${(slUsd*(1-p/100)).toFixed(2)}`;
+    const eP = document.getElementById('sl-pct-usado');
+    eP.textContent = p.toFixed(1)+'%';
+    const color = p<50?'green':p<80?'yellow':'red';
+    document.getElementById('barra-sl').className = `barra-sl h-2 rounded-full bg-${color}-500`;
+    document.getElementById('barra-sl').style.width = p+'%';
+    eP.className = `text-3xl font-mono font-bold text-${color}-400`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  BOT CONTROL
+// ════════════════════════════════════════════════════════════════════════════
+function actualizarBoton() {
+    const btn = document.getElementById('btn-status');
+    if (botActivo) { btn.textContent='EN VIVO'; btn.className='px-4 py-2 rounded font-bold text-sm uppercase bg-green-600 hover:bg-green-500 text-white transition'; }
+    else           { btn.textContent='APAGADO'; btn.className='px-4 py-2 rounded font-bold text-sm uppercase bg-red-600 hover:bg-red-500 text-white transition'; }
+}
+
+function alternarBot() {
+    botActivo = !botActivo; actualizarBoton();
+    fetch('/api/control', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({encender: botActivo}) })
+    .then(r=>r.json()).then(()=>{
+        agregarLog(botActivo?'🚀 Bot encendido. Escuchando mercado...':'🛑 Bot detenido.', botActivo?'yellow':'gray');
+        if (!botActivo) document.getElementById('precio-oro').textContent='---.--';
+        setTimeout(cargarEstadoInicial, 400);
+    });
+}
+
+function resetearSimulacion() {
+    if (!confirm('¿Resetear simulación? Se borrarán todas las operaciones y el capital vuelve a $1,000.00')) return;
+    fetch('/api/resetear', {method:'POST'}).then(r=>r.json()).then(()=>{
+        agregarLog('↺ Simulación reiniciada. Capital restaurado a $1,000.00', 'gray');
+        botActivo = false; actualizarBoton();
+        todoL.length=0; todoP.length=0; todoC.length=0; todoV.length=0; desplaz=0;
+        if (grafico) { grafico.data.labels=[]; grafico.data.datasets.forEach(d=>d.data=[]); grafico.update('none'); }
+        actualizarStopLoss(0, 30);
+        setTimeout(cargarEstadoInicial, 300);
+    });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  CONSOLA
+// ════════════════════════════════════════════════════════════════════════════
+function agregarLog(msg, color='green') {
+    const c = document.getElementById('consola-logs');
+    const m = {green:'text-green-400',blue:'text-blue-400',yellow:'text-yellow-400',red:'text-red-400',gray:'text-gray-500',orange:'text-orange-400'};
+    const d = document.createElement('div');
+    d.className   = (m[color]||'text-green-400') + ' fade-in';
+    d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    c.appendChild(d);
+    c.scrollTop = c.scrollHeight;
+    while (c.children.length > 150) c.removeChild(c.firstChild);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  TABLA
+// ════════════════════════════════════════════════════════════════════════════
+function renderizarTabla(historial, tbodyId) {
+    const tb = document.getElementById(tbodyId);
+    if (!tb) return;
+    tb.innerHTML = '';
+    if (!historial?.length) {
+        tb.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-gray-600 text-xs">// Sin operaciones</td></tr>`;
+        return;
+    }
+    historial.forEach(op => {
+        const tipoBadge =
+            op.tipo==='COMPRA'   ? `<span class="bg-blue-900/50 text-blue-400 border border-blue-800 px-1.5 py-0.5 rounded text-[10px] font-bold">COMPRA</span>`:
+            op.tipo==='VENTA'    ? `<span class="bg-green-900/50 text-green-400 border border-green-800 px-1.5 py-0.5 rounded text-[10px] font-bold">VENTA</span>`:
+                                   `<span class="bg-orange-900/50 text-orange-400 border border-orange-800 px-1.5 py-0.5 rounded text-[10px] font-bold">STOP-LOSS</span>`;
+        const estadoBadge = op.estado==='ABIERTA'
+            ? `<span class="bg-blue-900/30 text-blue-400 border border-blue-800/40 px-2 py-0.5 rounded-full text-[10px]">ABIERTA</span>`
+            : `<span class="bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full text-[10px]">CERRADA</span>`;
+        tb.innerHTML += `
+            <tr class="hover:bg-gray-700/20 border-b border-gray-800/40">
+                <td class="p-2 text-gray-500 text-[11px]">${op.fecha_ejecucion}</td>
+                <td class="p-2 text-gray-400 text-[10px]">${op.ticket_id}</td>
+                <td class="p-2">${tipoBadge}</td>
+                <td class="p-2 text-white font-bold">$${parseFloat(op.precio_ejecucion).toFixed(2)}</td>
+                <td class="p-2 text-gray-300">${parseFloat(op.cantidad).toFixed(4)}</td>
+                <td class="p-2 text-green-400">$${parseFloat(op.total_usd).toFixed(2)}</td>
+                <td class="p-2">${estadoBadge}</td>
+            </tr>`;
+    });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  WEBSOCKETS
+// ════════════════════════════════════════════════════════════════════════════
+socket.on('actualizacion_precio', data => {
+    if (botActivo && data.precio) {
+        PRECIO_ACT = data.precio;
+        document.getElementById('precio-oro').textContent = data.precio.toFixed(2);
+        agregarPuntoGrafico(data.precio, new Date().toLocaleTimeString());
+    }
+    if (data.pnl_flotante !== undefined) setPnlEl('pnl-flotante', data.pnl_flotante, 'xs');
+    if (data.stop_loss_pct_usado !== undefined) actualizarStopLoss(data.stop_loss_pct_usado, 30);
+});
+
+socket.on('nueva_operacion', data => {
+    const color = data.tipo==='COMPRA' ? 'blue' : 'green';
+    agregarLog(data.msg, color);
+    setTimeout(() => marcarOperacionGrafico(data.precio, data.tipo), 150);
+    setTimeout(cargarEstadoInicial, 400);
+});
+
+socket.on('stop_loss_activado', data => {
+    agregarLog(data.msg, 'red');
+    agregarLog('⚠️  Bot detenido automáticamente. Capital protegido.', 'orange');
+    botActivo = false; actualizarBoton(); actualizarStopLoss(100, 30);
+    setTimeout(cargarEstadoInicial, 500);
+});
+</script>
+</body>
+</html>
