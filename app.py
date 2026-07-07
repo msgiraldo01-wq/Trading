@@ -528,8 +528,11 @@ def resetear_simulacion():
 
 # ── ARRANQUE ───────────────────────────────────────────────────────────────────
 
+# ── ARRANQUE ───────────────────────────────────────────────────────────────────
+
+inicializar_base_datos()
+inicializar_precio_inicial()
+socketio.start_background_task(simulador_mercado_y_bot)
+
 if __name__ == '__main__':
-    inicializar_base_datos()
-    inicializar_precio_inicial()   # FIX: precio correcto desde el primer segundo
-    socketio.start_background_task(simulador_mercado_y_bot)
     socketio.run(app, debug=True, port=5001, use_reloader=False)
