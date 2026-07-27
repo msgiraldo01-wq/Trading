@@ -3,7 +3,7 @@ import math
 import random
 import sqlite3
 import requests
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file
 from flask_socketio import SocketIO
 
 app = Flask(__name__)
@@ -524,6 +524,13 @@ def resetear_simulacion():
         return jsonify({'status': 'ok'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    
+    
+from flask import send_file
+
+@app.route('/api/descargar-db')
+def descargar_db():
+    return send_file(DB_PATH, as_attachment=True, download_name='trading_actualizado.db')    
 
 
 # ── ARRANQUE ───────────────────────────────────────────────────────────────────
